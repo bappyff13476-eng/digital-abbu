@@ -16,7 +16,7 @@ interface GlassCardProps {
   onPress?: () => void;
 }
 
-const SPRING_CONFIG = { damping: 15, stiffness: 150, mass: 0.8 };
+const SPRING_CONFIG = { damping: 15, stiffness: 150, mass: 0.8, useNativeDriver: true };
 
 export default function GlassCard({ children, style, onPress }: GlassCardProps) {
   const scale = useSharedValue(1);
@@ -51,15 +51,15 @@ export default function GlassCard({ children, style, onPress }: GlassCardProps) 
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: rgba(GLASS_CONTAINER, 0.40),
-    borderColor: rgba(FLUID_BORDER, 0.20),
+    backgroundColor: rgba(GLASS_CONTAINER, 0.42),
+    borderColor: rgba(FLUID_BORDER, 0.24),
     borderWidth: 1,
     borderRadius: 20,
     padding: 16,
     overflow: 'hidden',
     shadowColor: NEON_ACCENT,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.18,
     shadowRadius: 20,
     elevation: 8,
   },

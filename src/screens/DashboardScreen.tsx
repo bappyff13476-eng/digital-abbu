@@ -1,19 +1,19 @@
 /**
  * DashboardScreen — Main interface with platform tracking cards
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
   SafeAreaView,
-  NativeModules,
   Pressable,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import GlassCard from '../components/GlassCard';
+import { useEmergencyLock } from '../../App';
 import ProgressWheel from '../components/ProgressWheel';
 import CooldownTicker from '../components/CooldownTicker';
 import PulseIcon from '../components/PulseIcon';
@@ -35,6 +35,12 @@ import {
   DAILY_ALLOWANCE_MINUTES,
   TrackedPlatform,
 } from '../constants/limits';
+import {
+  getDefaultAllowances,
+  getPlatformAllowance,
+  loadAllowances,
+} from '../utils/allowances';
+import { fetchBangladeshTime } from '../utils/time';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
 
@@ -43,6 +49,7 @@ type PlatformStatus = 'active' | 'blocked' | 'cooldown';
 interface PlatformData {
   platform: TrackedPlatform;
   usageMinutes: number;
+  allowanceMinutes: number;
   status: PlatformStatus;
   cooldownEndTime?: number;
 }
@@ -53,35 +60,134 @@ const STATUS_CONFIG = {
   cooldown: { label: 'COOLDOWN', color: WARNING_AMBER },
 };
 
-export default function DashboardScreen({ navigation }: Props) {
+const DashboardScreen = memo(function DashboardScreen({ navigation }: Props) {
+  const { isLoading, isEmergencyUnlocked, isHardLocked, timeRemainingMs, canUseEmergencyToday, statusMessage, activateEmergencyUnlock } = useEmergencyLock();
   const [platformData, setPlatformData] = useState<PlatformData[]>([]);
+  const [allowances, setAllowances] = useState<Record<string, number>>(
+    getDefaultAllowances()
+  );
   const [shieldActive, setShieldActive] = useState(true);
+  const [clockStatus, setClockStatus] = useState<'network' | 'offline'>('offline');
 
-  // ── Load usage data (mock for demo, native bridge in production) ──
   useEffect(() => {
-    const mockData: PlatformData[] = TRACKED_PLATFORMS.map((platform, index) => {
-      const usageMinutes = Math.floor(Math.random() * 28) + 2;
-      let status: PlatformStatus = 'active';
-      let cooldownEndTime: number | undefined;
+    let active = true;
 
-      if (usageMinutes >= DAILY_ALLOWANCE_MINUTES) {
-        status = 'blocked';
-      } else if (index === 2) {
-        // Demo: Facebook in cooldown
-        status = 'cooldown';
-        cooldownEndTime = Date.now() + 90000; // 1.5 min
+    (async () => {
+      const loadedAllowances = await loadAllowances();
+      const time = await fetchBangladeshTime();
+
+      if (!active) {
+        return;
       }
 
-      return { platform, usageMinutes, status, cooldownEndTime };
-    });
+      const resolvedAllowances =
+        Object.keys(loadedAllowances).length > 0
+          ? loadedAllowances
+          : getDefaultAllowances();
 
-    setPlatformData(mockData);
+      setAllowances(resolvedAllowances);
+      setClockStatus(time.status);
 
-    // In production: poll UsageStatsModule every 10 seconds
-    // const { UsageStatsModule } = NativeModules;
-    // const interval = setInterval(async () => { ... }, 10000);
-    // return () => clearInterval(interval);
+      const mockData: PlatformData[] = TRACKED_PLATFORMS.map((platform, index) => {
+        const allowanceMinutes = getPlatformAllowance(
+          resolvedAllowances,
+          platform.id,
+          DAILY_ALLOWANCE_MINUTES
+        );
+        const usageMinutes = Math.min(
+          allowanceMinutes + 6,
+          Math.floor(Math.random() * (allowanceMinutes + 6)) + 2
+        );
+        let status: PlatformStatus = 'active';
+        let cooldownEndTime: number | undefined;
+
+        if (usageMinutes >= allowanceMinutes) {
+          status = 'blocked';
+        } else if (index === 2 && time.nowMs > 0) {
+          // Demo: Facebook in cooldown using Bangladesh network time
+          status = 'cooldown';
+          cooldownEndTime = time.nowMs + 90000;
+        }
+
+        return {
+          platform,
+          usageMinutes,
+          allowanceMinutes,
+          status,
+          cooldownEndTime,
+        };
+      });
+
+      setPlatformData(mockData);
+
+      // In production: poll UsageStatsModule every 10 seconds
+      // const { UsageStatsModule } = NativeModules;
+      // const interval = setInterval(async () => { ... }, 10000);
+      // return () => clearInterval(interval);
+    })();
+
+    return () => {
+      active = false;
+    };
   }, []);
+
+  const handleUnlockEmergency = useCallback(async () => {
+    await activateEmergencyUnlock();
+  }, [activateEmergencyUnlock]);
+
+  const handleNavigateToAdmin = useCallback(() => {
+    navigation.navigate('Admin');
+  }, [navigation]);
+
+  const formatTime = useCallback((ms: number) => {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }, []);
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.lockContainer}>
+          <Text style={styles.lockTitle}>INITIALIZING</Text>
+          <Text style={styles.lockText}>Preparing emergency access state...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!isEmergencyUnlocked && !isHardLocked) {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.lockContainer}>
+          <Text style={styles.lockIcon}>🛡️</Text>
+          <Text style={styles.lockTitle}>APP LOCKED</Text>
+          <Text style={styles.lockText}>{statusMessage}</Text>
+          <Text style={styles.lockHint}>No passwords or bypass routes remain available.</Text>
+          {canUseEmergencyToday ? (
+            <Pressable style={styles.emergencyButton} onPress={handleUnlockEmergency}>
+              <Text style={styles.emergencyButtonText}>3-MINUTE EMERGENCY ACCESS</Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.lockText}>Emergency unlock is already used for today.</Text>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (isHardLocked) {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.lockContainer}>
+          <Text style={styles.lockIcon}>🔒</Text>
+          <Text style={styles.lockTitle}>HARD LOCKOUT</Text>
+          <Text style={styles.lockText}>No password or bypass option is available. Access returns at the next calendar day in Bangladesh time.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -103,12 +209,19 @@ export default function DashboardScreen({ navigation }: Props) {
           <View style={styles.statusDot} />
           <Text style={styles.statusText}>SHIELD ACTIVE</Text>
         </View>
+        <View style={styles.emergencyBanner}>
+          <Text style={styles.emergencyBannerTitle}>EMERGENCY ACCESS</Text>
+          <Text style={styles.emergencyBannerText}>{formatTime(timeRemainingMs)} remaining</Text>
+        </View>
+        <Text style={[styles.clockStatusText, { color: clockStatus === 'network' ? SUCCESS_GREEN : WARNING_AMBER }]}> 
+          {clockStatus === 'network' ? 'BANGLADESH NETWORK TIME' : 'OFFLINE — TIME VALIDATION LIMITED'}
+        </Text>
 
         {/* ── Platform Cards Grid ─────────────────────────────── */}
         <View style={styles.grid}>
           {platformData.map((data) => {
-            const progress = 1 - data.usageMinutes / DAILY_ALLOWANCE_MINUTES;
-            const remaining = DAILY_ALLOWANCE_MINUTES - data.usageMinutes;
+            const progress = 1 - data.usageMinutes / data.allowanceMinutes;
+            const remaining = Math.max(0, data.allowanceMinutes - data.usageMinutes);
             const statusCfg = STATUS_CONFIG[data.status];
 
             return (
@@ -158,7 +271,7 @@ export default function DashboardScreen({ navigation }: Props) {
 
                 {/* Usage text */}
                 <Text style={styles.usageText}>
-                  {data.usageMinutes}m / {DAILY_ALLOWANCE_MINUTES}m used today
+                  {data.usageMinutes}m / {data.allowanceMinutes}m used today
                 </Text>
 
                 {/* Cooldown ticker */}
@@ -195,7 +308,9 @@ export default function DashboardScreen({ navigation }: Props) {
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Daily Allowance</Text>
-            <Text style={styles.summaryValue}>{DAILY_ALLOWANCE_MINUTES}m</Text>
+            <Text style={styles.summaryValue}>
+              {platformData.reduce((sum, d) => sum + d.allowanceMinutes, 0)}m
+            </Text>
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>DNS Shield</Text>
@@ -208,14 +323,14 @@ export default function DashboardScreen({ navigation }: Props) {
         {/* ── Admin Panel Button ──────────────────────────────── */}
         <GlassCard
           style={styles.adminButton}
-          onPress={() => navigation.navigate('Admin')}
+          onPress={handleNavigateToAdmin}
         >
           <View style={styles.adminButtonContent}>
             <Text style={styles.adminIcon}>⚙️</Text>
             <View>
               <Text style={styles.adminText}>ADMIN PANEL</Text>
               <Text style={styles.adminSubtext}>
-                PIN required to access
+                Emergency unlock required
               </Text>
             </View>
             <Text style={styles.adminArrow}>→</Text>
@@ -224,7 +339,9 @@ export default function DashboardScreen({ navigation }: Props) {
       </ScrollView>
     </SafeAreaView>
   );
-}
+});
+
+export default DashboardScreen;
 
 const styles = StyleSheet.create({
   screen: {
@@ -251,6 +368,48 @@ const styles = StyleSheet.create({
     color: SECONDARY_TEXT,
     marginTop: 4,
   },
+  lockContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  lockIcon: {
+    fontSize: 56,
+    marginBottom: 16,
+  },
+  lockTitle: {
+    ...TYPOGRAPHY.h2,
+    color: PRIMARY_TEXT,
+    marginBottom: 8,
+  },
+  lockText: {
+    ...TYPOGRAPHY.bodySmall,
+    color: SECONDARY_TEXT,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  lockHint: {
+    ...TYPOGRAPHY.bodySmall,
+    color: NEON_ACCENT,
+    textAlign: 'center',
+    marginTop: 8,
+    opacity: 0.9,
+  },
+  emergencyButton: {
+    marginTop: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: rgba(NEON_ACCENT, 0.15),
+    borderWidth: 1,
+    borderColor: rgba(NEON_ACCENT, 0.4),
+  },
+  emergencyButtonText: {
+    ...TYPOGRAPHY.label,
+    color: NEON_ACCENT,
+    fontSize: 12,
+  },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -271,6 +430,30 @@ const styles = StyleSheet.create({
   statusText: {
     ...TYPOGRAPHY.label,
     color: SUCCESS_GREEN,
+    fontSize: 10,
+  },
+  emergencyBanner: {
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: rgba(WARNING_AMBER, 0.12),
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  emergencyBannerTitle: {
+    ...TYPOGRAPHY.caption,
+    color: WARNING_AMBER,
+    fontSize: 9,
+  },
+  emergencyBannerText: {
+    ...TYPOGRAPHY.h3,
+    color: PRIMARY_TEXT,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  clockStatusText: {
+    ...TYPOGRAPHY.caption,
+    marginBottom: 20,
     fontSize: 10,
   },
   grid: {

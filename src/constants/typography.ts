@@ -5,29 +5,10 @@
 import { TextStyle, Platform } from 'react-native';
 
 // ─── Font Family Stack ──────────────────────────────────────────
-export const FONT_FAMILY = Platform.select({
-  android: 'Inter_400Regular',
-  ios: 'Inter-Regular',
-  default: 'Inter',
-}) as string;
-
-export const FONT_FAMILY_MEDIUM = Platform.select({
-  android: 'Inter_500Medium',
-  ios: 'Inter-Medium',
-  default: 'Inter',
-}) as string;
-
-export const FONT_FAMILY_SEMIBOLD = Platform.select({
-  android: 'Inter_600SemiBold',
-  ios: 'Inter-SemiBold',
-  default: 'Inter',
-}) as string;
-
-export const FONT_FAMILY_BOLD = Platform.select({
-  android: 'Inter_700Bold',
-  ios: 'Inter-Bold',
-  default: 'Inter',
-}) as string;
+export const FONT_FAMILY = 'Aquire';
+export const FONT_FAMILY_MEDIUM = 'AquireLight';
+export const FONT_FAMILY_SEMIBOLD = 'Aquire';
+export const FONT_FAMILY_BOLD = 'AquireBold';
 
 // ─── Type Scale ─────────────────────────────────────────────────
 export const TYPOGRAPHY = {

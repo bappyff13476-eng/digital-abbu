@@ -1,7 +1,7 @@
 /**
- * AdminScreen — Secure control panel (PIN-gated)
+ * AdminScreen — Emergency-only control panel
  */
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState, memo } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,13 @@ import {
   Switch,
   Pressable,
   Alert,
+  TextInput,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import GlassCard from '../components/GlassCard';
 import CooldownTicker from '../components/CooldownTicker';
+import { useEmergencyLock } from '../../App';
 import {
   DEEP_BACKGROUND,
   PRIMARY_TEXT,
@@ -37,14 +39,38 @@ import {
   CONFIG_COOLDOWN_MS,
   TRACKED_PLATFORMS,
 } from '../constants/limits';
+import { loadAllowances, saveAllowances } from '../utils/allowances';
+import { fetchBangladeshTime } from '../utils/time';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Admin'>;
 
-export default function AdminScreen({ navigation }: Props) {
+const AdminScreen = memo(function AdminScreen({ navigation }: Props) {
+  const { isLoading, isEmergencyUnlocked, isHardLocked, timeRemainingMs, statusMessage } = useEmergencyLock();
+
   // Platform toggle states
   const [platformEnabled, setPlatformEnabled] = useState<Record<string, boolean>>(
     Object.fromEntries(TRACKED_PLATFORMS.map((p) => [p.id, true]))
   );
+
+  const [allowances, setAllowances] = useState<Record<string, number>>({});
+  const [clockStatus, setClockStatus] = useState<'network' | 'offline'>('offline');
+
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      const loadedAllowances = await loadAllowances();
+      const time = await fetchBangladeshTime();
+      if (active) {
+        setAllowances(loadedAllowances);
+        setClockStatus(time.status);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Commitment mode
   const [commitmentActive, setCommitmentActive] = useState(false);
@@ -53,12 +79,12 @@ export default function AdminScreen({ navigation }: Props) {
   // Device Admin
   const [deviceAdminEnabled, setDeviceAdminEnabled] = useState(false);
 
-  const handleTogglePlatform = (id: string) => {
+  const handleTogglePlatform = useCallback((id: string) => {
     if (commitmentActive) return; // Locked during commitment
     setPlatformEnabled((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
+  }, [commitmentActive]);
 
-  const handleActivateCommitment = () => {
+  const handleActivateCommitment = useCallback(() => {
     Alert.alert(
       'ACTIVATE COMMITMENT MODE',
       `This will lock ALL settings for ${CONFIG_COOLDOWN_HOURS} hours.\n\n` +
@@ -72,10 +98,17 @@ export default function AdminScreen({ navigation }: Props) {
         {
           text: 'ACTIVATE',
           style: 'destructive',
-          onPress: () => {
-            const endTime = Date.now() + CONFIG_COOLDOWN_MS;
+          onPress: async () => {
+            const time = await fetchBangladeshTime();
+            if (time.nowMs <= 0) {
+              Alert.alert('CLOCK UNAVAILABLE', 'Secure Bangladesh time could not be fetched. Commitment mode cannot be activated right now.');
+              return;
+            }
+
+            const endTime = time.nowMs + CONFIG_COOLDOWN_MS;
             setCommitmentActive(true);
             setCommitmentEndTime(endTime);
+            setClockStatus(time.status);
 
             // In production: NativeModules.CooldownManager.startCooldown()
             // and start AppMonitorService + DnsVpnService
@@ -83,9 +116,9 @@ export default function AdminScreen({ navigation }: Props) {
         },
       ]
     );
-  };
+  }, []);
 
-  const handleDeviceAdmin = (value: boolean) => {
+  const handleDeviceAdmin = useCallback((value: boolean) => {
     if (value) {
       Alert.alert(
         'ENABLE DEVICE ADMIN',
@@ -106,21 +139,46 @@ export default function AdminScreen({ navigation }: Props) {
       }
       setDeviceAdminEnabled(false);
     }
-  };
+  }, [commitmentActive]);
 
-  const handleChangePin = () => {
-    if (commitmentActive) {
-      Alert.alert('LOCKED', 'Cannot change PIN during commitment mode.');
-      return;
-    }
-    Alert.alert('CHANGE PIN', 'This will redirect you to create a new PIN.', [
-      { text: 'CANCEL', style: 'cancel' },
-      {
-        text: 'PROCEED',
-        onPress: () => navigation.replace('Pin'),
-      },
-    ]);
-  };
+  const handleAllowanceChange = useCallback((platformId: string, value: string) => {
+    const numericValue = Number(value.replace(/[^0-9]/g, ''));
+    setAllowances((prev) => ({
+      ...prev,
+      [platformId]: Number.isFinite(numericValue) && numericValue > 0 ? numericValue : 0,
+    }));
+  }, []);
+
+  const handleSaveAllowances = useCallback(async () => {
+    await saveAllowances(allowances);
+    Alert.alert('SAVED', 'Daily allowances updated successfully.');
+  }, [allowances]);
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.lockContainer}>
+          <Text style={styles.lockTitle}>INITIALIZING</Text>
+          <Text style={styles.lockText}>Preparing emergency access state...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!isEmergencyUnlocked) {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.lockContainer}>
+          <Text style={styles.lockIcon}>🔒</Text>
+          <Text style={styles.lockTitle}>{isHardLocked ? 'HARD LOCKOUT' : 'ADMIN LOCKED'}</Text>
+          <Text style={styles.lockText}>{statusMessage}</Text>
+          {isHardLocked ? null : (
+            <Text style={styles.lockText}>Use the emergency unlock from the main screen.</Text>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -150,7 +208,43 @@ export default function AdminScreen({ navigation }: Props) {
           />
         </GlassCard>
 
-        {/* ── Section 2: Platform Controls ─────────────────────── */}
+        {/* ── Section 2: Daily Allowances ─────────────────────── */}
+        <Text style={styles.sectionLabel}>DAILY ALLOWANCES</Text>
+        <GlassCard style={styles.sectionCard}>
+          {TRACKED_PLATFORMS.map((platform) => (
+            <View
+              key={platform.id}
+              style={[styles.platformRow, styles.rowBorder]}
+            >
+              <View style={styles.platformInfo}>
+                <Text style={[styles.platformIcon, { color: platform.color }]}>
+                  {platform.icon}
+                </Text>
+                <View>
+                  <Text style={styles.platformName}>{platform.name}</Text>
+                  <Text style={styles.deviceAdminDesc}>Daily cap</Text>
+                </View>
+              </View>
+              <View style={styles.allowanceInputContainer}>
+                <TextInput
+                  style={styles.allowanceInput}
+                  value={String(allowances[platform.id] ?? '')}
+                  onChangeText={(value) => handleAllowanceChange(platform.id, value)}
+                  keyboardType="number-pad"
+                  maxLength={3}
+                  placeholder={String(DAILY_ALLOWANCE_MINUTES)}
+                  placeholderTextColor={rgba(SECONDARY_TEXT, 0.5)}
+                />
+                <Text style={styles.allowanceUnit}>MIN</Text>
+              </View>
+            </View>
+          ))}
+          <Pressable style={styles.saveButton} onPress={handleSaveAllowances}>
+            <Text style={styles.saveButtonText}>SAVE ALLOWANCES</Text>
+          </Pressable>
+        </GlassCard>
+
+        {/* ── Section 3: Platform Controls ─────────────────────── */}
         <Text style={styles.sectionLabel}>PLATFORM CONTROLS</Text>
         <GlassCard style={styles.sectionCard}>
           {TRACKED_PLATFORMS.map((platform, index) => (
@@ -188,7 +282,7 @@ export default function AdminScreen({ navigation }: Props) {
           ))}
         </GlassCard>
 
-        {/* ── Section 3: Commitment Mode ───────────────────────── */}
+        {/* ── Section 4: Commitment Mode ───────────────────────── */}
         <Text style={styles.sectionLabel}>COMMITMENT MODE</Text>
         <GlassCard
           style={[
@@ -196,6 +290,19 @@ export default function AdminScreen({ navigation }: Props) {
             { borderColor: rgba(WARNING_AMBER, 0.3) },
           ]}
         >
+          <Text
+            style={[
+              styles.clockStatusText,
+              {
+                color:
+                  clockStatus === 'network' ? SUCCESS_GREEN : WARNING_AMBER,
+              },
+            ]}
+          >
+            {clockStatus === 'network'
+              ? 'NETWORK TIME ACTIVE'
+              : 'OFFLINE — PROTECTION REMAINS ACTIVE'}
+          </Text>
           <Text style={styles.commitmentTitle}>
             {commitmentActive
               ? '48-HOUR LOCK ACTIVE'
@@ -230,7 +337,7 @@ export default function AdminScreen({ navigation }: Props) {
           )}
         </GlassCard>
 
-        {/* ── Section 4: Device Admin ──────────────────────────── */}
+        {/* ── Section 5: Device Admin ──────────────────────────── */}
         <Text style={styles.sectionLabel}>DEVICE ADMIN</Text>
         <GlassCard style={styles.sectionCard}>
           <View style={styles.platformRow}>
@@ -256,29 +363,19 @@ export default function AdminScreen({ navigation }: Props) {
           </View>
         </GlassCard>
 
-        {/* ── Section 5: Change PIN ────────────────────────────── */}
-        <GlassCard style={styles.changePinCard} onPress={handleChangePin}>
-          <Text style={styles.changePinText}>CHANGE ADMIN PIN</Text>
-        </GlassCard>
-
-        {/* ── Lock Overlay Preview ─────────────────────────────── */}
-        <GlassCard
-          style={styles.overlayPreview}
-          onPress={() =>
-            navigation.navigate('LockOverlay', { adminAuthorized: true })
-          }
-        >
-          <Text style={styles.overlayPreviewText}>
-            PREVIEW LOCK OVERLAY
-          </Text>
+        {/* ── Section 6: Emergency-Only Access ─────────────────── */}
+        <GlassCard style={styles.changePinCard} onPress={() => navigation.goBack()}>
+          <Text style={styles.changePinText}>RETURN TO EMERGENCY WINDOW</Text>
           <Text style={styles.overlayPreviewSub}>
-            View the blocker screen
+            No passwords. Only the emergency unlock remains active.
           </Text>
         </GlassCard>
       </ScrollView>
     </SafeAreaView>
   );
-}
+});
+
+export default AdminScreen;
 
 // ── Reusable Rule Row ────────────────────────────────────────────
 function RuleRow({
@@ -302,6 +399,27 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: DEEP_BACKGROUND,
+  },
+  lockContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  lockIcon: {
+    fontSize: 56,
+    marginBottom: 16,
+  },
+  lockTitle: {
+    ...TYPOGRAPHY.h2,
+    color: PRIMARY_TEXT,
+    marginBottom: 8,
+  },
+  lockText: {
+    ...TYPOGRAPHY.bodySmall,
+    color: SECONDARY_TEXT,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   scrollContent: {
     padding: 20,
@@ -368,6 +486,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
   },
+  allowanceInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  allowanceInput: {
+    minWidth: 56,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: rgba(FLUID_BORDER, 0.15),
+    backgroundColor: rgba(GLASS_CONTAINER, 0.35),
+    color: PRIMARY_TEXT,
+    textAlign: 'center',
+  },
+  allowanceUnit: {
+    ...TYPOGRAPHY.caption,
+    color: SECONDARY_TEXT,
+    fontSize: 10,
+  },
+  saveButton: {
+    marginTop: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: rgba(NEON_ACCENT, 0.14),
+    borderWidth: 1,
+    borderColor: rgba(NEON_ACCENT, 0.3),
+  },
+  saveButtonText: {
+    ...TYPOGRAPHY.label,
+    color: NEON_ACCENT,
+    fontSize: 11,
+  },
   platformInfo: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -404,8 +557,12 @@ const styles = StyleSheet.create({
   commitmentDesc: {
     ...TYPOGRAPHY.bodySmall,
     color: SECONDARY_TEXT,
-    marginBottom: 16,
+    marginBottom: 8,
     lineHeight: 20,
+  },
+  clockStatusText: {
+    ...TYPOGRAPHY.caption,
+    marginBottom: 12,
   },
   commitmentTimer: {
     alignItems: 'center',

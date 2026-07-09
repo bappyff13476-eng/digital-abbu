@@ -1,7 +1,7 @@
 /**
  * CooldownTicker — Animated countdown timer with pulsing effect
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -12,6 +12,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { NEON_ACCENT, SECONDARY_TEXT } from '../constants/colors';
 import { TYPOGRAPHY } from '../constants/typography';
+import { fetchBangladeshTime } from '../utils/time';
 
 interface CooldownTickerProps {
   endTime: number; // Unix timestamp in milliseconds
@@ -36,15 +37,32 @@ function formatTime(ms: number): string {
     .padStart(2, '0')}`;
 }
 
-export default function CooldownTicker({
+const CooldownTicker = memo(function CooldownTicker({
   endTime,
   onComplete,
   label = 'COOLDOWN',
 }: CooldownTickerProps) {
-  const [remaining, setRemaining] = useState(Math.max(0, endTime - Date.now()));
+  const [remaining, setRemaining] = useState(0);
+  const [clockStatus, setClockStatus] = useState<'network' | 'offline'>('offline');
   const opacity = useSharedValue(1);
 
   const isComplete = remaining <= 0;
+
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      const time = await fetchBangladeshTime();
+      if (active) {
+        setClockStatus(time.status);
+        setRemaining(Math.max(0, endTime - (time.nowMs > 0 ? time.nowMs : Date.now())));
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [endTime]);
 
   useEffect(() => {
     if (!isComplete) {
@@ -63,8 +81,9 @@ export default function CooldownTicker({
   useEffect(() => {
     if (isComplete) return;
 
-    const interval = setInterval(() => {
-      const now = Date.now();
+    const interval = setInterval(async () => {
+      const time = await fetchBangladeshTime();
+      const now = time.nowMs > 0 ? time.nowMs : Date.now();
       const diff = endTime - now;
 
       if (diff <= 0) {
@@ -86,12 +105,15 @@ export default function CooldownTicker({
   return (
     <View style={styles.container}>
       <Text style={styles.label}>{label}</Text>
+      <Text style={styles.clockStatus}>{clockStatus === 'network' ? 'SYNCED' : 'OFFLINE'}</Text>
       <Animated.View style={pulseStyle}>
         <Text style={styles.timer}>{formatTime(remaining)}</Text>
       </Animated.View>
     </View>
   );
-}
+});
+
+export default CooldownTicker;
 
 const styles = StyleSheet.create({
   container: {
@@ -101,6 +123,12 @@ const styles = StyleSheet.create({
     ...TYPOGRAPHY.caption,
     color: SECONDARY_TEXT,
     marginBottom: 4,
+  },
+  clockStatus: {
+    ...TYPOGRAPHY.caption,
+    color: SECONDARY_TEXT,
+    fontSize: 8,
+    marginBottom: 6,
   },
   timer: {
     ...TYPOGRAPHY.timer,

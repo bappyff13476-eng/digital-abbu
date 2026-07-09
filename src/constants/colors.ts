@@ -4,25 +4,25 @@
  */
 
 // ─── Core Palette ───────────────────────────────────────────────
-export const DEEP_BACKGROUND = '#090D1A';
-export const GLASS_CONTAINER = '#1E293B';
-export const GLASS_CONTAINER_OPACITY = 0.40;
+export const DEEP_BACKGROUND = '#050303';
+export const GLASS_CONTAINER = '#1C1C1F';
+export const GLASS_CONTAINER_OPACITY = 0.46;
 export const GLASS_BLUR_RADIUS = 50;
 
-export const FLUID_BORDER = '#38BDF8';
-export const FLUID_BORDER_OPACITY = 0.20;
+export const FLUID_BORDER = '#6DB1B7';
+export const FLUID_BORDER_OPACITY = 0.28;
 
-export const PRIMARY_TEXT = '#F8FAFC';
-export const SECONDARY_TEXT = '#64748B';
-export const NEON_ACCENT = '#38BDF8';
+export const PRIMARY_TEXT = '#F5F7FA';
+export const SECONDARY_TEXT = '#95A4AE';
+export const NEON_ACCENT = '#6DB1B7';
 
 // ─── Extended Palette ───────────────────────────────────────────
-export const DANGER_RED = '#EF4444';
-export const WARNING_AMBER = '#F59E0B';
-export const SUCCESS_GREEN = '#10B981';
-export const DEEP_NAVY = '#0F172A';
-export const SURFACE_ELEVATED = '#1E293B';
-export const OVERLAY_BACKDROP = 'rgba(0, 0, 0, 0.85)';
+export const DANGER_RED = '#D84A2A';
+export const WARNING_AMBER = '#AF4323';
+export const SUCCESS_GREEN = '#6DB1B7';
+export const DEEP_NAVY = '#050303';
+export const SURFACE_ELEVATED = '#232327';
+export const OVERLAY_BACKDROP = 'rgba(2, 3, 3, 0.9)';
 
 // ─── Platform Brand Colors ──────────────────────────────────────
 export const PLATFORM_COLORS: Record<string, string> = {
