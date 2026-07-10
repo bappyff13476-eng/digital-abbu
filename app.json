@@ -37,8 +37,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "digital-abbu-local"
+        "projectId": "7691a96b-75ce-4a9a-b9ac-4a8a9d0d85d4"
       }
-    }
+    },
+    "owner": "bappyff13476-eng"
   }
 }
