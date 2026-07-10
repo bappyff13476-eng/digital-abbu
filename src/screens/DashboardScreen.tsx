@@ -13,7 +13,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import GlassCard from '../components/GlassCard';
-import { useEmergencyLock } from '../../App';
+import { useEmergencyLock } from '../contexts/EmergencyLockContext';
 import ProgressWheel from '../components/ProgressWheel';
 import CooldownTicker from '../components/CooldownTicker';
 import PulseIcon from '../components/PulseIcon';

@@ -17,7 +17,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import GlassCard from '../components/GlassCard';
 import CooldownTicker from '../components/CooldownTicker';
-import { useEmergencyLock } from '../../App';
+import { useEmergencyLock } from '../contexts/EmergencyLockContext';
 import {
   DEEP_BACKGROUND,
   PRIMARY_TEXT,
